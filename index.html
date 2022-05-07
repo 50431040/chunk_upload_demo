@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>切片上传</title>
+</head>
+
+<body>
+    <script src="https://cdn.bootcdn.net/ajax/libs/axios/0.27.2/axios.js"></script>
+    <div>
+        请选择文件：
+        <input type="file" id="upload">
+    </div>
+    <script>
+        const url = "http://localhost:8080"
+
+        // 切片
+        function generateChunkList(file) {
+            const list = []
+            // 分割大小：1M
+            const size = 1024 * 1024
+            let cur = 0
+
+            while (cur < file.size) {
+                list.push({
+                    chunk: file.slice(cur, cur + size),
+                    hash: cur
+                })
+                cur += size
+            }
+
+            return list
+        }
+
+        // 上传
+        function upload(data, filename, size) {
+            return new Promise((resolve, reject) => {
+                const {
+                    chunk,
+                    hash
+                } = data
+
+                const formData = new FormData()
+                formData.append("chunk", chunk)
+                formData.append("hash", hash)
+                formData.append("filename", filename)
+                formData.append("size", size)
+
+                axios({
+                    method: "POST",
+                    url,
+                    data: formData
+                }).then(resolve).catch(reject)
+            })
+        }
+
+        document.getElementById("upload").addEventListener("change", function () {
+            const files = this.files
+            const file = files[0]
+            const chunks = generateChunkList(file)
+            const filename = `${new Date().getTime()}_${file.name}`
+
+            Promise.all(chunks.map((data) => upload(data, filename, file.size))).then(() => console.log('上传成功'))
+                .catch(() => console.log('上传失败'))
+
+        })
+    </script>
+</body>
+
+</html>
