@@ -16,9 +16,11 @@
         justify-content: center;
         align-items: center;
     }
+
     #progress {
         margin-top: 10px;
     }
+
     #btn {
         width: 60px;
         height: 30px;
@@ -40,105 +42,150 @@
     </div>
     <div id="progress">
         当前进度：<span id="progressText">0</span>%
-        <button id="btn">暂停</button>
+        <button id="btn" style="display: none;">暂停</button>
     </div>
 
     <!-- axios -->
     <script src="https://cdn.bootcdn.net/ajax/libs/axios/0.27.2/axios.js"></script>
 
     <script>
-        const url = "http://localhost:8080"
+        (function () {
+            // 上传地址
+            const url = "http://localhost:8080"
+            // 是否为暂停状态
+            let isPause = false
 
-        // 切片
-        function generateChunkList(file) {
-            const list = []
-            // 分割大小：1M
-            const size = 1024 * 1024
-            let cur = 0
+            // 切片
+            function generateChunkList(file) {
+                const list = []
+                // 分割大小：1M
+                const size = 1024 * 50
+                let cur = 0
 
-            while (cur < file.size) {
-                list.push({
-                    chunk: file.slice(cur, cur + size),
-                    hash: cur
-                })
-                cur += size
+                while (cur < file.size) {
+                    list.push({
+                        chunk: file.slice(cur, cur + size),
+                        hash: cur
+                    })
+                    cur += size
+                }
+
+                return list
             }
 
-            return list
-        }
+            // 上传
+            function upload(data, filename, size) {
+                return new Promise((resolve, reject) => {
+                    const {
+                        chunk,
+                        hash
+                    } = data
 
-        // 上传
-        function upload(data, filename, size) {
-            return new Promise((resolve, reject) => {
-                const {
-                    chunk,
-                    hash
-                } = data
+                    const formData = new FormData()
+                    formData.append("chunk", chunk)
+                    formData.append("hash", hash)
+                    formData.append("filename", filename)
+                    formData.append("size", size)
 
-                const formData = new FormData()
-                formData.append("chunk", chunk)
-                formData.append("hash", hash)
-                formData.append("filename", filename)
-                formData.append("size", size)
+                    axios({
+                        method: "POST",
+                        url,
+                        data: formData
+                    }).then(resolve).catch(reject)
+                })
+            }
 
-                axios({
-                    method: "POST",
-                    url,
-                    data: formData
-                }).then(resolve).catch(reject)
+            /**
+             * 批量上传
+             * @param chunks 切片数据
+             * @param filename 文件名
+             * @param size 文件总大小
+             * @param completeCallback 任意一个chunk上传完成时执行，参数为下一次开始的序号（记录下次继续上传时开始的序号）
+             * @param startIndex 从chunks的某个序号开始上传（断点续传）
+             * @param maxTaskCount 同时上传的最大任务数量
+             */
+            function partUpload(chunks, filename, size, completeCallback, startIndex = 0, maxTaskCount = 5) {
+
+                // 完成数量
+                let completeCount = startIndex
+
+                const progressTextDom = document.getElementById("progressText")
+
+                const loop = (index) => {
+                    upload(chunks[index], filename, size).then(() => {
+
+                        completeCount++
+                        // 更新进度
+                        progressTextDom.innerText = Math.floor(completeCount / chunks.length * 100)
+                            .toString()
+
+                        if (isPause) {
+                            return;
+                        }
+
+                        if (completeCount === chunks.length) {
+                            console.log('所有chunk上传完成')
+                            document.getElementById("btn").style.display = "none"
+                            return
+                        }
+
+                        if (startIndex < chunks.length) {
+                            loop(startIndex++)
+                            completeCallback && completeCallback(startIndex)
+                            console.log(startIndex, chunks.length)
+                        }
+
+                    }).catch((err) => {
+                        console.log("上传失败", err)
+                        document.getElementById("btn").style.display = "none"
+                    })
+                }
+
+                // 开始多个任务
+                for (let i = 0; i < maxTaskCount && startIndex < chunks.length; i++) {
+                    loop(startIndex++)
+                }
+
+            }
+
+
+            // 上传的文件
+            let file
+            // 文件切割后的数据
+            let chunks
+            // 文件名
+            let filename
+            // 当前上传序号
+            let curIndex
+
+            document.getElementById("upload").addEventListener("change", function () {
+                const files = this.files
+                file = files[0]
+
+                if (!file) {
+                    return
+                }
+
+                chunks = generateChunkList(file)
+                filename = `${new Date().getTime()}_${file.name}`
+                curIndex = 0
+
+                document.getElementById("progressText").innerText = "0"
+                document.getElementById("btn").style.display = "inline-block"
+
+                partUpload(chunks, filename, file.size, (index) => curIndex = index, curIndex, 2)
+
             })
-        }
 
-        function partUpload(chunks, filename, size, max = 5) {
-
-            // 执行序号
-            let execIndex = 0
-            // 完成数量
-            let completeCount = 0
-
-            const progressTextDom = document.getElementById("progressText")
-
-            const loop = (index) => {
-                upload(chunks[index], filename, size).then(() => {
-
-                    completeCount++
-                    // 更新进度
-                    progressTextDom.innerText = Math.floor(completeCount / chunks.length * 100).toString()
-                    
-                    if (completeCount === chunks.length) {
-                        console.log('所有chunk上传完成')
-                        return
-                    }
-
-                    if (execIndex < chunks.length) {
-                        loop(execIndex++)
-                    }
-                    
-                }).catch((err) => {
-                    console.log("上传失败", err)
-                })
-            }
-            
-            for (; execIndex < max && execIndex < chunks.length; execIndex++) {
-                loop(execIndex)
-            }
-        }
-
-        document.getElementById("upload").addEventListener("change", function () {
-            const files = this.files
-            const file = files[0]
-
-            if (!file) {
-                return
-            }
-
-            const chunks = generateChunkList(file)
-            const filename = `${new Date().getTime()}_${file.name}`
-
-            document.getElementById("progressText").innerText = "0"
-
-            partUpload(chunks, filename, file.size)
-        })
+            document.getElementById("btn").addEventListener("click", function () {
+                isPause = this.innerText === "暂停"
+                this.innerText = isPause ? "继续" : "暂停"
+                // 继续上传
+                if (!isPause) {
+                    partUpload(chunks, filename, file.size, (index) => curIndex = index, curIndex, 5)
+                }
+            })
+        })()
     </script>
 </body>
 
